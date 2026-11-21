@@ -80,12 +80,13 @@ max 3 redirects, 5s timeout, 1MB body cap. Blocked fetches return
 | --- | --- | --- |
 | `PORT` | no | `3102` |
 | `TENANT_KEYS` | no (required for isolation) | `test-key-1,test-key-2` |
-| `OPENROUTER_API_KEY` | no | `sk-or-v1-fake-example-key` |
+| `OPENROUTER_API_KEY` | no | `(unset — offline default)` |
 | `OPENROUTER_BASE_URL` | no | `https://openrouter.ai/api/v1` |
 | `OPENROUTER_MODEL` | no | `example-model` |
 
-See `.env.example` for fake-only sample values. Leave
-`OPENROUTER_API_KEY` empty for the default offline extractive mode.
+See `.env.example` for fake-only sample values — never export it verbatim.
+Keep `OPENROUTER_API_KEY` unset or commented out for the default offline
+extractive mode; any non-empty value enables the LLM rewrite path.
 
 ## Error contract
 
