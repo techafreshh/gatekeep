@@ -121,4 +121,33 @@ describe("POST /query hybrid retrieval", () => {
       assert.ok(body && typeof body.error === "string");
     }
   });
+
+  it("serves no in-memory stub docs on a fresh DB (SQLite chunks only)", async () => {
+    const { status, body } = await post(portB, "/query", {
+      q: "secure multi-tenant RAG gateway quoted citations",
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body.citations, []);
+    assert.match(body.answer, /No relevant documents found/);
+  });
+
+  it("surfaces freshly ingested SQLite chunks with matching docId", async () => {
+    const token = `ZebraQuasar${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+    const ing = await post(portA, "/ingest", {
+      text: `The ${token} nebula glows over the test harbor.`,
+      source: "manual",
+    });
+    assert.equal(ing.status, 200);
+    assert.equal(typeof ing.body.docId, "string");
+    const { status, body } = await post(portA, "/query", { q: token });
+    assert.equal(status, 200);
+    assert.ok(Array.isArray(body.citations));
+    assert.ok(body.citations.length >= 1);
+    assert.ok(
+      body.citations.some((c) => c.docId === ing.body.docId),
+      "expected a citation with the ingest docId",
+    );
+    const haystack = `${body.answer} ${body.citations.map((c) => c.text).join(" ")}`;
+    assert.ok(haystack.includes(token));
+  });
 });

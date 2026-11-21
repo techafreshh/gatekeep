@@ -8,20 +8,7 @@ import { retrieveAndAnswer } from "./retrieve";
 import { isLlmEnabled, rewriteAnswerWithLlm } from "./llm";
 import { runEval } from "./eval";
 
-interface Doc {
-  docId: string;
-  text: string;
-}
-
 type AuthedRequest = IncomingMessage & { tenant?: string };
-
-const DOCS: Doc[] = [
-  { docId: "doc-1", text: "Gatekeep is a secure multi-tenant RAG gateway." },
-  { docId: "doc-2", text: "Answers always include quoted citations from retrieved chunks." },
-  { docId: "doc-3", text: "The health endpoint reports whether the API is running." },
-];
-
-const tenantDocs = new Map<string, Doc[]>();
 
 type Handler = (
   req: IncomingMessage,
@@ -144,15 +131,6 @@ async function handleIngest(
     const target = url.trim();
     try {
       const result = await ingestUrl(target, tenant);
-      const authEnabled = getTenantKeys().length > 0;
-      const doc: Doc = { docId: result.docId, text: result.text };
-      if (!authEnabled) {
-        DOCS.push(doc);
-      } else {
-        const list = tenantDocs.get(tenant) ?? [];
-        list.push(doc);
-        tenantDocs.set(tenant, list);
-      }
       logAudit(
         tenant,
         "ingest",
@@ -174,15 +152,6 @@ async function handleIngest(
     // `source` is an opaque label stored in the chunks.source column only;
     // it is never used as a file path and never read from disk.
     const result = ingestText(clean, source, tenant);
-    const authEnabled = getTenantKeys().length > 0;
-    const doc: Doc = { docId: result.docId, text: clean };
-    if (!authEnabled) {
-      DOCS.push(doc);
-    } else {
-      const list = tenantDocs.get(tenant) ?? [];
-      list.push(doc);
-      tenantDocs.set(tenant, list);
-    }
     logAudit(
       tenant,
       "ingest",
@@ -367,4 +336,4 @@ function resolvePort(raw: unknown): number {
 const port = resolvePort(process.env["PORT"]);
 server.listen(port);
 
-export { server, DOCS, resolvePort };
+export { server, resolvePort };
