@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_TENANT, insertChunk } from "./db";
 import { FetchBlockedError, fetchUrlText } from "./fetchUrl";
+import { cleanText } from "./guard";
 
 export type { FetchUrlOptions } from "./fetchUrl";
 
@@ -57,7 +58,8 @@ export function ingestText(
   source: string = "manual",
   tenant: string = DEFAULT_TENANT,
 ): { docId: string; chunks: number } {
-  const chunks = chunkText(text.trim());
+  const cleaned = cleanText(text);
+  const chunks = chunkText(cleaned.text.trim());
   const docId = randomUUID();
   chunks.forEach((chunk, index) => {
     insertChunk(docId, tenant, index, chunk, source, embedText(chunk));
@@ -69,12 +71,18 @@ export async function ingestUrl(
   url: string,
   tenant: string = DEFAULT_TENANT,
   opts?: { allowLoopback?: boolean; allowPrivate?: boolean },
-): Promise<{ docId: string; chunks: number; text: string }> {
+): Promise<{
+  docId: string;
+  chunks: number;
+  text: string;
+  alarms: string[];
+}> {
   const { text, finalUrl } = await fetchUrlText(url, opts);
-  const cleaned = text.trim();
+  const guarded = cleanText(text);
+  const cleaned = guarded.text.trim();
   if (cleaned.length === 0) {
     throw new FetchBlockedError("empty document");
   }
   const result = ingestText(cleaned, finalUrl, tenant);
-  return { ...result, text: cleaned };
+  return { ...result, text: cleaned, alarms: guarded.alarms };
 }

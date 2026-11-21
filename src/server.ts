@@ -2,6 +2,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { authenticate, checkRateLimit, getTenantKeys } from "./auth";
 import { getAudit, logAudit } from "./audit";
 import { ingestText, ingestUrl } from "./ingest";
+import { cleanText } from "./guard";
 import { FetchBlockedError } from "./fetchUrl";
 import { retrieveAndAnswer } from "./retrieve";
 import { runEval } from "./eval";
@@ -108,7 +109,11 @@ async function handleIngest(
         list.push(doc);
         tenantDocs.set(tenant, list);
       }
-      logAudit(tenant, "ingest", result.docId);
+      logAudit(
+        tenant,
+        "ingest",
+        `${result.docId} alarms:${result.alarms.join(",") || "none"}`,
+      );
       sendJson(res, 200, { docId: result.docId, chunks: result.chunks });
     } catch (err) {
       if (err instanceof FetchBlockedError) {
@@ -120,9 +125,10 @@ async function handleIngest(
     }
     return;
   }
-  const result = ingestText(text, source, tenant);
+  const { text: clean, alarms } = cleanText(text);
+  const result = ingestText(clean, source, tenant);
   const authEnabled = getTenantKeys().length > 0;
-  const doc: Doc = { docId: result.docId, text };
+  const doc: Doc = { docId: result.docId, text: clean };
   if (!authEnabled) {
     DOCS.push(doc);
   } else {
@@ -130,7 +136,11 @@ async function handleIngest(
     list.push(doc);
     tenantDocs.set(tenant, list);
   }
-  logAudit(tenant, "ingest", result.docId);
+  logAudit(
+    tenant,
+    "ingest",
+    `${result.docId} alarms:${alarms.join(",") || "none"}`,
+  );
   sendJson(res, 200, result);
 }
 
@@ -151,14 +161,16 @@ function handleQuery(
     sendJson(res, 400, { error: "q required" });
     return;
   }
+  const { text: cleanQ, alarms: qAlarms } = cleanText(q);
+  const detail = `${cleanQ.slice(0, 200)} alarms:${qAlarms.join(",") || "none"}`;
   try {
-    const result = retrieveAndAnswer(tenant, q);
-    logAudit(tenant, "query", q.slice(0, 200));
+    const result = retrieveAndAnswer(tenant, cleanQ);
+    logAudit(tenant, "query", detail);
     sendJson(res, 200, result);
   } catch {
-    logAudit(tenant, "query", q.slice(0, 200));
+    logAudit(tenant, "query", detail);
     sendJson(res, 200, {
-      answer: `No relevant documents found for "${q.slice(0, 200)}".`,
+      answer: `No relevant documents found for "${cleanQ.slice(0, 200)}".`,
       citations: [],
     });
   }
