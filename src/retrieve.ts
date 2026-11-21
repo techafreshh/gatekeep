@@ -81,9 +81,9 @@ export function vecSearch(tenantId: string, query: string): ChunkHit[] {
     try {
       rows = database
         .prepare(
-          "SELECT rowid, distance FROM chunk_vec WHERE embedding MATCH ? AND k = 20",
+          `SELECT rowid, distance FROM chunk_vec WHERE embedding MATCH ? AND k = ${VEC_LIMIT} AND tenant_id = ?`,
         )
-        .all(blob) as Array<{ rowid: number | bigint }>;
+        .all(blob, tenantId) as Array<{ rowid: number | bigint }>;
     } catch {
       return [];
     }

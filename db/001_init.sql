@@ -20,4 +20,4 @@ CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
   INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
   INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
 END;
-CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(embedding float[128]);
+CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(embedding float[128], tenant_id TEXT PARTITION KEY);
