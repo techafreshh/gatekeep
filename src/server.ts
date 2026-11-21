@@ -3,6 +3,7 @@ import { authenticate, checkRateLimit, getTenantKeys } from "./auth";
 import { getAudit, logAudit } from "./audit";
 import { ingestText } from "./ingest";
 import { retrieveAndAnswer } from "./retrieve";
+import { runEval } from "./eval";
 
 interface Doc {
   docId: string;
@@ -141,6 +142,21 @@ function handleQuery(
   }
 }
 
+function handleEval(req: IncomingMessage, res: ServerResponse): void {
+  const tenant = (req as AuthedRequest).tenant ?? "default";
+  try {
+    const result = runEval(tenant);
+    logAudit(
+      tenant,
+      "eval",
+      `count=${result.count} faithfulness=${result.faithfulness} citation_precision=${result.citation_precision}`,
+    );
+    sendJson(res, 200, result);
+  } catch {
+    sendJson(res, 500, { error: "eval failed" });
+  }
+}
+
 function handleAudit(req: IncomingMessage, res: ServerResponse): void {
   const tenant = (req as AuthedRequest).tenant ?? "default";
   const rawUrl = req.url ?? "/";
@@ -167,6 +183,7 @@ const routes: Record<string, Handler> = {
   "POST /query": (req, res, body) => handleQuery(req, res, body),
   "POST /ingest": (req, res, body) => handleIngest(req, res, body),
   "GET /audit": (req, res) => handleAudit(req, res),
+  "GET /eval": (req, res) => handleEval(req, res),
 };
 
 const server = createServer((req, res) => {
