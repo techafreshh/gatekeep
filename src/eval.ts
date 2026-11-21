@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { ingestText } from "./ingest";
+import { closeDb, getDb } from "./db";
 import { retrieveAndAnswer } from "./retrieve";
 
 export interface GoldenItem {
@@ -17,6 +18,23 @@ export interface EvalResult {
 }
 
 const seededTenants = new Set<string>();
+
+function hasGoldenChunks(tenant: string): boolean {
+  if (!existsSync(path.join(process.cwd(), "data", "gatekeep.sqlite3"))) {
+    closeDb();
+    return false;
+  }
+  try {
+    const row = getDb()
+      .prepare(
+        "SELECT COUNT(*) AS count FROM chunks WHERE tenant_id = ? AND source = 'golden'",
+      )
+      .get(tenant) as { count: number } | null;
+    return Number(row?.count ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
 
 function goldenCandidates(): string[] {
   return [
@@ -41,7 +59,10 @@ export function loadGolden(): GoldenItem[] {
 
 export function ensureSeeded(tenant: string): void {
   if (seededTenants.has(tenant)) {
-    return;
+    if (hasGoldenChunks(tenant)) {
+      return;
+    }
+    seededTenants.delete(tenant);
   }
   const golden = loadGolden();
   for (const item of golden) {
