@@ -1,0 +1,16 @@
+{
+  "name": "gatekeep",
+  "version": "0.1.0",
+  "description": "Secure multi-tenant RAG gateway — walking skeleton",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2"
+  }
+}
