@@ -221,9 +221,13 @@ export function retrieveAndAnswer(
   }
   const top = ranked[0] as RankedHit;
   const answer = pickSentence(top.text, query);
+  const cited = ranked.filter((hit) => hit.overlap > 0).slice(0, FUSED_TOP_N);
+  if (cited.length === 0) {
+    return fallbackAnswer(query);
+  }
   return {
     answer,
-    citations: ranked.slice(0, FUSED_TOP_N).map((hit) => ({
+    citations: cited.map((hit) => ({
       docId: hit.docId,
       chunk: hit.chunk,
       text: hit.text,

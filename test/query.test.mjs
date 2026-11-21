@@ -113,6 +113,44 @@ describe("POST /query hybrid retrieval", () => {
     }
   });
 
+  it("cites only chunks that overlap the query tokens", async () => {
+    const token = `zxqcite${Date.now()}${Math.floor(Math.random() * 1e6)}`.toLowerCase();
+    const matchIng = await post(portA, "/ingest", {
+      text: `The ${token} nebula glows over the test harbor.`,
+      source: "manual",
+    });
+    assert.equal(matchIng.status, 200);
+    const distractors = [
+      "Harbor lighthouse bricks quietly sheltered gulls during storm season.",
+      "Meadow badgers burrowed beneath clover fields at dawn.",
+      "Vintage clocks ticked inside dusty attic corridors.",
+      "Desert cacti flourished under scorching midday sun.",
+      "Orchestra violins tuned softly before evening concert.",
+    ];
+    for (const text of distractors) {
+      const ing = await post(portA, "/ingest", { text, source: "manual" });
+      assert.equal(ing.status, 200);
+    }
+    const { status, body } = await post(portA, "/query", { q: token });
+    assert.equal(status, 200);
+    assert.ok(Array.isArray(body.citations));
+    assert.ok(body.citations.length >= 1);
+    assert.ok(body.citations.length <= 8);
+    const queryTokens = new Set(token.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+    for (const c of body.citations) {
+      assert.equal(typeof c.docId, "string");
+      assert.equal(typeof c.chunk, "number");
+      assert.equal(typeof c.text, "string");
+      const chunkTokens = new Set(
+        c.text.toLowerCase().match(/[a-z0-9]+/g) ?? [],
+      );
+      assert.ok(
+        [...queryTokens].some((t) => chunkTokens.has(t)),
+        `citation without query overlap: ${c.text.slice(0, 120)}`,
+      );
+    }
+  });
+
   it("returns 4xx JSON error for empty or missing q, never 500", async () => {
     for (const payload of [{ q: "" }, {}]) {
       const { status, body } = await post(portA, "/query", payload);
