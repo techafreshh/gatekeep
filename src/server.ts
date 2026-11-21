@@ -1,6 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { authenticate, checkRateLimit, getTenantKeys } from "./auth";
 import { getAudit, logAudit } from "./audit";
+import { ingestText } from "./ingest";
 
 interface Doc {
   docId: string;
@@ -16,7 +17,6 @@ const DOCS: Doc[] = [
 ];
 
 const tenantDocs = new Map<string, Doc[]>();
-let docCounter = 1;
 
 type Handler = (
   req: IncomingMessage,
@@ -73,26 +73,32 @@ function handleIngest(
   body: unknown,
 ): void {
   const tenant = (req as AuthedRequest).tenant ?? "default";
-  let text: unknown;
-  let url: unknown;
+  let text = "";
+  let url = "";
+  let source = "manual";
   if (body !== null && typeof body === "object" && !Array.isArray(body)) {
     const record = body as Record<string, unknown>;
-    text = record["text"];
-    url = record["url"];
+    if (typeof record["text"] === "string") {
+      text = record["text"];
+    }
+    if (typeof record["url"] === "string") {
+      url = record["url"];
+    }
+    if (typeof record["source"] === "string") {
+      source = record["source"];
+    }
   }
-  let content: string | null = null;
-  if (typeof text === "string" && text.trim().length > 0) {
-    content = text;
-  } else if (typeof url === "string" && url.trim().length > 0) {
-    content = url;
-  }
-  if (content === null) {
-    sendJson(res, 400, { error: "Missing text or url" });
+  if (text.trim().length === 0 && url.trim().length === 0) {
+    sendJson(res, 400, { error: "text or url required" });
     return;
   }
+  if (text.trim().length === 0) {
+    sendJson(res, 400, { error: "URL ingest not yet supported" });
+    return;
+  }
+  const result = ingestText(text, source, tenant);
   const authEnabled = getTenantKeys().length > 0;
-  const docId = `doc-${Date.now()}-${docCounter++}`;
-  const doc: Doc = { docId, text: content };
+  const doc: Doc = { docId: result.docId, text };
   if (!authEnabled) {
     DOCS.push(doc);
   } else {
@@ -100,8 +106,8 @@ function handleIngest(
     list.push(doc);
     tenantDocs.set(tenant, list);
   }
-  logAudit(tenant, "ingest", docId);
-  sendJson(res, 200, { docId, chunks: 1 });
+  logAudit(tenant, "ingest", result.docId);
+  sendJson(res, 200, result);
 }
 
 function handleQuery(
