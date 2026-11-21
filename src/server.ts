@@ -5,6 +5,7 @@ import { ingestText, ingestUrl } from "./ingest";
 import { cleanText } from "./guard";
 import { FetchBlockedError } from "./fetchUrl";
 import { retrieveAndAnswer } from "./retrieve";
+import { isLlmEnabled, rewriteAnswerWithLlm } from "./llm";
 import { runEval } from "./eval";
 
 interface Doc {
@@ -144,11 +145,11 @@ async function handleIngest(
   sendJson(res, 200, result);
 }
 
-function handleQuery(
+async function handleQuery(
   req: IncomingMessage,
   res: ServerResponse,
   body: unknown,
-): void {
+): Promise<void> {
   const tenant = (req as AuthedRequest).tenant ?? "default";
   let q = "";
   if (body !== null && typeof body === "object" && !Array.isArray(body)) {
@@ -166,6 +167,24 @@ function handleQuery(
   try {
     const result = retrieveAndAnswer(tenant, cleanQ);
     logAudit(tenant, "query", detail);
+    if (result.citations.length > 0 && isLlmEnabled()) {
+      try {
+        const polished = await rewriteAnswerWithLlm(
+          cleanQ,
+          result.answer,
+          result.citations.map((c) => c.text),
+        );
+        if (polished !== null && polished.length > 0) {
+          sendJson(res, 200, {
+            answer: polished,
+            citations: result.citations,
+          });
+          return;
+        }
+      } catch {
+        // Fall through to the extractive result below.
+      }
+    }
     sendJson(res, 200, result);
   } catch {
     logAudit(tenant, "query", detail);
