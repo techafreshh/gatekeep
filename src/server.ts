@@ -2,6 +2,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { authenticate, checkRateLimit, getTenantKeys } from "./auth";
 import { getAudit, logAudit } from "./audit";
 import { ingestText } from "./ingest";
+import { retrieveAndAnswer } from "./retrieve";
 
 interface Doc {
   docId: string;
@@ -123,32 +124,21 @@ function handleQuery(
       q = candidate;
     }
   }
-  const authEnabled = getTenantKeys().length > 0;
-  if (!authEnabled) {
-    const answer = `Stub answer for "${q}" based on ${DOCS.length} docs.`;
-    const citations = DOCS.map((doc) => ({
-      docId: doc.docId,
-      chunk: 0,
-      text: doc.text,
-    }));
-    logAudit(tenant, "query", q.slice(0, 200));
-    sendJson(res, 200, { answer, citations });
+  if (q.trim().length === 0) {
+    sendJson(res, 400, { error: "q required" });
     return;
   }
-  const docs = tenantDocs.get(tenant) ?? [];
-  const needle = q.toLowerCase();
-  const matched =
-    needle.trim() === ""
-      ? []
-      : docs.filter((doc) => doc.text.toLowerCase().includes(needle));
-  const citations = matched.map((doc) => ({
-    docId: doc.docId,
-    chunk: 0,
-    text: doc.text,
-  }));
-  const answer = `Stub answer for "${q}" based on ${matched.length} docs.`;
-  logAudit(tenant, "query", q.slice(0, 200));
-  sendJson(res, 200, { answer, citations });
+  try {
+    const result = retrieveAndAnswer(tenant, q);
+    logAudit(tenant, "query", q.slice(0, 200));
+    sendJson(res, 200, result);
+  } catch {
+    logAudit(tenant, "query", q.slice(0, 200));
+    sendJson(res, 200, {
+      answer: `No relevant documents found for "${q.slice(0, 200)}".`,
+      citations: [],
+    });
+  }
 }
 
 function handleAudit(req: IncomingMessage, res: ServerResponse): void {
