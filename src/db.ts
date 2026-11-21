@@ -44,6 +44,59 @@ function runMigrations(database: DatabaseSync): void {
   }
 }
 
+function ensureChunkVecTenantColumn(database: DatabaseSync): void {
+  try {
+    if (!vecAvailable) {
+      return;
+    }
+    const row = database
+      .prepare("SELECT sql FROM sqlite_master WHERE name = 'chunk_vec'")
+      .get() as { sql: string | null } | null;
+    const sql = row?.sql ?? "";
+    if (/tenant_id/i.test(sql)) {
+      return;
+    }
+    // Snapshot preserved embedding bytes plus their tenant ids before
+    // dropping the old single-column table. vec0 shadow tables do not
+    // survive ALTER ... RENAME, so rebuild in place instead of the usual
+    // create-copy-rename swap; re-inserting the raw bytes keeps the
+    // upgrade byte-exact with no re-ingest.
+    const oldRows = database
+      .prepare("SELECT rowid, embedding FROM chunk_vec")
+      .all() as Array<{
+        rowid: number | bigint;
+        embedding: Uint8Array | null;
+      }>;
+    const tenants = new Map<number, string>();
+    const chunkRows = database
+      .prepare("SELECT id, tenant_id FROM chunks")
+      .all() as Array<{ id: number | bigint; tenant_id: string }>;
+    for (const chunkRow of chunkRows) {
+      tenants.set(Number(chunkRow.id), String(chunkRow.tenant_id));
+    }
+    database.exec("DROP TABLE chunk_vec");
+    database.exec(
+      "CREATE VIRTUAL TABLE chunk_vec USING vec0(embedding float[128], tenant_id TEXT PARTITION KEY)",
+    );
+    const insert = database.prepare(
+      "INSERT INTO chunk_vec (rowid, embedding, tenant_id) VALUES (?, ?, ?)",
+    );
+    for (const oldRow of oldRows) {
+      const tenantId = tenants.get(Number(oldRow.rowid));
+      if (tenantId === undefined || oldRow.embedding === null) {
+        continue;
+      }
+      try {
+        insert.run(BigInt(Number(oldRow.rowid)), oldRow.embedding, tenantId);
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // Best-effort upgrade; vecSearch already fails closed to FTS-only.
+  }
+}
+
 export function getDb(): DatabaseSync {
   if (db) {
     return db;
@@ -63,6 +116,7 @@ export function getDb(): DatabaseSync {
     console.warn("sqlite-vec failed to load; continuing with FTS5 only");
   }
   runMigrations(database);
+  ensureChunkVecTenantColumn(database);
   db = database;
   return db;
 }
@@ -89,8 +143,8 @@ export function insertChunk(
   if (vecAvailable) {
     try {
       database
-        .prepare("INSERT INTO chunk_vec (rowid, embedding) VALUES (?, ?)")
-        .run(BigInt(rowId), new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength));
+        .prepare("INSERT INTO chunk_vec (rowid, embedding, tenant_id) VALUES (?, ?, ?)")
+        .run(BigInt(rowId), new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength), tenantId);
     } catch {
       // Vector insert is best-effort; the FTS row above is the source of truth.
     }
