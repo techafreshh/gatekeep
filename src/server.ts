@@ -121,28 +121,35 @@ async function handleIngest(
         logAudit(tenant, "block", err.message);
         sendJson(res, 400, { error: err.message });
       } else {
-        sendJson(res, 500, { error: "Internal error" });
+        sendJson(res, 400, { error: "Internal error" });
       }
     }
     return;
   }
-  const { text: clean, alarms } = cleanText(text);
-  const result = ingestText(clean, source, tenant);
-  const authEnabled = getTenantKeys().length > 0;
-  const doc: Doc = { docId: result.docId, text: clean };
-  if (!authEnabled) {
-    DOCS.push(doc);
-  } else {
-    const list = tenantDocs.get(tenant) ?? [];
-    list.push(doc);
-    tenantDocs.set(tenant, list);
+  try {
+    const { text: clean, alarms } = cleanText(text);
+    // `source` is an opaque label stored in the chunks.source column only;
+    // it is never used as a file path and never read from disk.
+    const result = ingestText(clean, source, tenant);
+    const authEnabled = getTenantKeys().length > 0;
+    const doc: Doc = { docId: result.docId, text: clean };
+    if (!authEnabled) {
+      DOCS.push(doc);
+    } else {
+      const list = tenantDocs.get(tenant) ?? [];
+      list.push(doc);
+      tenantDocs.set(tenant, list);
+    }
+    logAudit(
+      tenant,
+      "ingest",
+      `${result.docId} alarms:${alarms.join(",") || "none"}`,
+    );
+    sendJson(res, 200, result);
+  } catch {
+    logAudit(tenant, "block", "ingest failed");
+    sendJson(res, 400, { error: "Internal error" });
   }
-  logAudit(
-    tenant,
-    "ingest",
-    `${result.docId} alarms:${alarms.join(",") || "none"}`,
-  );
-  sendJson(res, 200, result);
 }
 
 async function handleQuery(
@@ -206,7 +213,7 @@ function handleEval(req: IncomingMessage, res: ServerResponse): void {
     );
     sendJson(res, 200, result);
   } catch {
-    sendJson(res, 500, { error: "eval failed" });
+    sendJson(res, 400, { error: "eval failed" });
   }
 }
 
@@ -287,7 +294,7 @@ const server = createServer((req, res) => {
         if (err instanceof FetchBlockedError) {
           sendJson(res, 400, { error: err.message });
         } else {
-          sendJson(res, 500, { error: "Internal error" });
+          sendJson(res, 400, { error: "Internal error" });
         }
       }
     }
