@@ -48,11 +48,50 @@ function sendJson(
   res.end(data);
 }
 
+export const MAX_JSON_BODY_BYTES = 1048576;
+
+export class BodyTooLargeError extends Error {
+  constructor(message = "Request body too large") {
+    super(message);
+    this.name = "BodyTooLargeError";
+  }
+}
+
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  // Fast path: reject a declared Content-Length over the cap without
+  // buffering anything. Resume (with no data listener) so the inbound
+  // bytes drain instead of piling up; the dispatcher still answers 413.
+  const declared = req.headers["content-length"];
+  if (declared !== undefined) {
+    const first = Array.isArray(declared) ? declared[0] : declared;
+    const size = Number(String(first ?? "").trim());
+    if (Number.isFinite(size) && size > MAX_JSON_BODY_BYTES) {
+      req.resume();
+      return Promise.reject(new BodyTooLargeError());
+    }
+  }
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let total = 0;
+    let tooLarge = false;
+    req.on("data", (chunk: Buffer) => {
+      // Past the cap: discard further bytes without buffering them.
+      if (tooLarge) {
+        return;
+      }
+      total += chunk.length;
+      if (total > MAX_JSON_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        reject(new BodyTooLargeError());
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
+      if (tooLarge) {
+        return;
+      }
       const raw = Buffer.concat(chunks).toString("utf8");
       if (raw.length === 0) {
         resolve({});
@@ -64,7 +103,11 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
         reject(new Error("Invalid JSON"));
       }
     });
-    req.on("error", () => reject(new Error("Invalid JSON")));
+    req.on("error", () => {
+      if (!tooLarge) {
+        reject(new Error("Invalid JSON"));
+      }
+    });
   });
 }
 
@@ -283,8 +326,12 @@ const server = createServer((req, res) => {
       if (method === "POST" || method === "PUT" || method === "PATCH") {
         try {
           body = await readJsonBody(req);
-        } catch {
-          sendJson(res, 400, { error: "Invalid JSON" });
+        } catch (err) {
+          if (err instanceof BodyTooLargeError) {
+            sendJson(res, 413, { error: "Request body too large" });
+          } else {
+            sendJson(res, 400, { error: "Invalid JSON" });
+          }
           return;
         }
       }
