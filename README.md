@@ -92,7 +92,7 @@ See `.env.example` for fake-only sample values. Leave
 - Every error is JSON `{error:"..."}` with `Content-Type: application/json`.
 - Malformed input returns `4xx` (usually `400`, `401` unauthenticated,
   `404` unknown route, `429` rate-limited), never `500`.
-- Error bodies never include stacks or exception text (no `at ` frames);
+- Error bodies never include stacks or exception text (no `\n    at ` stack frames);
   only the SSRF `FetchBlockedError` message is echoed verbatim, all other
   failures map to fixed generic strings (`Internal error`, `eval failed`).
 
