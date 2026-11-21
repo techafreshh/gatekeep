@@ -1,5 +1,6 @@
 node_modules/
 dist/
+data/gatekeep.sqlite3
 data/*.sqlite3
 data/*.sqlite3-*
 .env
