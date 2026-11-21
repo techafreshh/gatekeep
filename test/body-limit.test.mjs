@@ -17,6 +17,12 @@ const KEY = "testkey";
 // live server inside this test process via its top-level listen().)
 const MAX_JSON_BODY_BYTES = 1048576;
 
+// V8 stack frames start on a new line with horizontal indent; the \\n
+// alternative covers stacks serialized via JSON.stringify. Never match
+// the bare substring "at " — success prose like
+// "concerts at Bennelong Point" must not trip the leak guard.
+const STACK_FRAME_RE = /(?:\n|\\n)[ \t]+at /;
+
 let port = 0;
 let child = null;
 let tmpdir = null;
@@ -78,6 +84,13 @@ function contentType(res) {
   return String(res.headers["content-type"] ?? "");
 }
 
+function assertNoStackLeak(raw) {
+  assert.ok(
+    !STACK_FRAME_RE.test(raw),
+    `stack leak in ${String(raw).slice(0, 200)}`,
+  );
+}
+
 function assertTooLarge(res) {
   assert.equal(res.status, 413, `expected 413, got ${res.status}: ${res.raw.slice(0, 200)}`);
   assert.ok(
@@ -86,7 +99,7 @@ function assertTooLarge(res) {
   );
   assert.ok(res.json && typeof res.json.error === "string", `expected {error} in ${res.raw.slice(0, 200)}`);
   assert.equal(res.json.error, "Request body too large");
-  assert.ok(!res.raw.includes("at "), `stack leak in ${res.raw.slice(0, 200)}`);
+  assertNoStackLeak(res.raw);
 }
 
 async function waitForHealth(timeoutMs = 10000) {

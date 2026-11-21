@@ -12,6 +12,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_ENTRY = path.join(__dirname, "..", "dist", "server.js");
 const KEY = "testkey";
 
+// V8 stack frames start on a new line with horizontal indent ("\n    at fn").
+// Matching that prefix — never the bare substring "at " — keeps success
+// prose like "concerts at Bennelong Point" from tripping the leak guard.
+// The \\n alternative covers stacks serialized via JSON.stringify,
+// where newlines reach the raw body backslash-escaped.
+const STACK_FRAME_RE = /(?:\n|\\n)[ \t]+at /;
+
 let port = 0;
 let child = null;
 let tmpdir = null;
@@ -75,6 +82,13 @@ function contentType(res) {
   return String(res.headers["content-type"] ?? "");
 }
 
+function assertNoStackLeak(raw) {
+  assert.ok(
+    !STACK_FRAME_RE.test(raw),
+    `stack leak in ${String(raw).slice(0, 200)}`,
+  );
+}
+
 function assertJsonError(res) {
   assert.ok(
     res.status >= 400 && res.status < 500,
@@ -86,7 +100,7 @@ function assertJsonError(res) {
     `expected JSON content-type, got ${contentType(res)}`,
   );
   assert.ok(res.json && typeof res.json.error === "string", `expected {error} in ${res.raw}`);
-  assert.ok(!res.raw.includes("at "), `stack leak in ${res.raw}`);
+  assertNoStackLeak(res.raw);
 }
 
 async function waitForHealth(timeoutMs = 10000) {
@@ -152,7 +166,7 @@ describe("hardening: traversal source is stored safely", () => {
       `expected docId or error in ${r.raw}`,
     );
     assert.ok(!r.raw.includes("root:"), `passwd leak in ${r.raw}`);
-    assert.ok(!r.raw.includes("at "), `stack leak in ${r.raw}`);
+    assertNoStackLeak(r.raw);
   });
 });
 
@@ -209,7 +223,40 @@ describe("hardening: five-endpoint smoke returns 2xx/4xx JSON, never 500/stack",
         `expected JSON content-type, got ${contentType(r)}: ${r.raw}`,
       );
       assert.ok(r.json !== null, `expected JSON body, got ${r.raw}`);
-      assert.ok(!r.raw.includes("at "), `stack leak in ${r.raw}`);
+      assertNoStackLeak(r.raw);
     }
+  });
+});
+
+describe("hardening: prose containing ' at ' is not a stack leak", () => {
+  it("ingest/query round-trip with ' at ' prose passes the frame matcher", async () => {
+    const token = `bennelong${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+    const ing = await httpRequest("POST", "/ingest", {
+      key: KEY,
+      body: {
+        text: `Evening ${token} concerts at Bennelong Point drew a large crowd.`,
+        source: "manual",
+      },
+    });
+    assert.equal(ing.status, 200, `ingest failed: ${ing.raw}`);
+    const q = await httpRequest("POST", "/query", {
+      key: KEY,
+      body: { q: token },
+    });
+    assert.equal(q.status, 200, `query failed: ${q.raw}`);
+    assert.ok(q.json, `expected JSON body, got ${q.raw}`);
+    assert.ok(
+      q.raw.includes(" at "),
+      `expected ' at ' prose in response, got ${q.raw.slice(0, 200)}`,
+    );
+    assertNoStackLeak(q.raw);
+  });
+
+  it("frame matcher catches real and JSON-escaped stacks, not prose", () => {
+    assert.ok(STACK_FRAME_RE.test("Error: x\n    at foo (a.js:1:2)"));
+    assert.ok(
+      STACK_FRAME_RE.test('{"error":"Error: x\\n    at foo (a.js:1:2)"}'),
+    );
+    assert.ok(!STACK_FRAME_RE.test("concerts at Bennelong Point"));
   });
 });
