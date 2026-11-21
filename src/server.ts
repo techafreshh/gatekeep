@@ -348,7 +348,23 @@ const server = createServer((req, res) => {
   })();
 });
 
-const port = Number(process.env["PORT"]) || 3000;
+function resolvePort(raw: unknown): number {
+  const DEFAULT_PORT = 3000;
+  if (raw === undefined || raw === null) {
+    return DEFAULT_PORT;
+  }
+  const text = String(raw).trim();
+  if (text === "") {
+    return DEFAULT_PORT;
+  }
+  const value = Number(text);
+  if (Number.isInteger(value) && value >= 0 && value <= 65535) {
+    return value;
+  }
+  return DEFAULT_PORT;
+}
+
+const port = resolvePort(process.env["PORT"]);
 server.listen(port);
 
-export { server, DOCS };
+export { server, DOCS, resolvePort };
