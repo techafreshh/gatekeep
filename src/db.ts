@@ -90,7 +90,7 @@ export function insertChunk(
     try {
       database
         .prepare("INSERT INTO chunk_vec (rowid, embedding) VALUES (?, ?)")
-        .run(BigInt(rowId), new Uint8Array(embedding.buffer));
+        .run(BigInt(rowId), new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength));
     } catch {
       // Vector insert is best-effort; the FTS row above is the source of truth.
     }
