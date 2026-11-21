@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_TENANT, insertChunk } from "./db";
+import { FetchBlockedError, fetchUrlText } from "./fetchUrl";
+
+export type { FetchUrlOptions } from "./fetchUrl";
 
 export const CHUNK_WORDS = 400;
 export const CHUNK_OVERLAP = 50;
@@ -60,4 +63,18 @@ export function ingestText(
     insertChunk(docId, tenant, index, chunk, source, embedText(chunk));
   });
   return { docId, chunks: chunks.length };
+}
+
+export async function ingestUrl(
+  url: string,
+  tenant: string = DEFAULT_TENANT,
+  opts?: { allowLoopback?: boolean; allowPrivate?: boolean },
+): Promise<{ docId: string; chunks: number; text: string }> {
+  const { text, finalUrl } = await fetchUrlText(url, opts);
+  const cleaned = text.trim();
+  if (cleaned.length === 0) {
+    throw new FetchBlockedError("empty document");
+  }
+  const result = ingestText(cleaned, finalUrl, tenant);
+  return { ...result, text: cleaned };
 }

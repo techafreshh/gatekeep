@@ -1,7 +1,8 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { authenticate, checkRateLimit, getTenantKeys } from "./auth";
 import { getAudit, logAudit } from "./audit";
-import { ingestText } from "./ingest";
+import { ingestText, ingestUrl } from "./ingest";
+import { FetchBlockedError } from "./fetchUrl";
 import { retrieveAndAnswer } from "./retrieve";
 import { runEval } from "./eval";
 
@@ -24,7 +25,7 @@ type Handler = (
   req: IncomingMessage,
   res: ServerResponse,
   body: unknown,
-) => void;
+) => void | Promise<void>;
 
 function sendJson(
   res: ServerResponse,
@@ -69,11 +70,11 @@ function handleHealth(_req: IncomingMessage, res: ServerResponse): void {
   sendJson(res, 200, { ok: true });
 }
 
-function handleIngest(
+async function handleIngest(
   req: IncomingMessage,
   res: ServerResponse,
   body: unknown,
-): void {
+): Promise<void> {
   const tenant = (req as AuthedRequest).tenant ?? "default";
   let text = "";
   let url = "";
@@ -95,7 +96,28 @@ function handleIngest(
     return;
   }
   if (text.trim().length === 0) {
-    sendJson(res, 400, { error: "URL ingest not yet supported" });
+    const target = url.trim();
+    try {
+      const result = await ingestUrl(target, tenant);
+      const authEnabled = getTenantKeys().length > 0;
+      const doc: Doc = { docId: result.docId, text: result.text };
+      if (!authEnabled) {
+        DOCS.push(doc);
+      } else {
+        const list = tenantDocs.get(tenant) ?? [];
+        list.push(doc);
+        tenantDocs.set(tenant, list);
+      }
+      logAudit(tenant, "ingest", result.docId);
+      sendJson(res, 200, { docId: result.docId, chunks: result.chunks });
+    } catch (err) {
+      if (err instanceof FetchBlockedError) {
+        logAudit(tenant, "block", err.message);
+        sendJson(res, 400, { error: err.message });
+      } else {
+        sendJson(res, 500, { error: "Internal error" });
+      }
+    }
     return;
   }
   const result = ingestText(text, source, tenant);
@@ -228,10 +250,14 @@ const server = createServer((req, res) => {
           return;
         }
       }
-      handler(req, res, body);
-    } catch {
+      await handler(req, res, body);
+    } catch (err) {
       if (!res.headersSent) {
-        sendJson(res, 500, { error: "Internal error" });
+        if (err instanceof FetchBlockedError) {
+          sendJson(res, 400, { error: err.message });
+        } else {
+          sendJson(res, 500, { error: "Internal error" });
+        }
       }
     }
   })();
