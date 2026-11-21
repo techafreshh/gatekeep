@@ -112,7 +112,7 @@ describe("POST /ingest", () => {
   });
 
   it("returns 400 with error for url-only ingest, never 500", async () => {
-    const { status, body } = await post(port, { url: "https://example.com" });
+    const { status, body } = await post(port, { url: "ftp://example.com/x" });
     assert.equal(status, 400);
     assert.ok("error" in body);
   });
