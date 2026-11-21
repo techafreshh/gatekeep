@@ -20,7 +20,8 @@ TENANT_KEYS=testkey PORT=3102 npm start
 
 The server listens on `$PORT` (default `3000`). `GET /health` is public;
 every other endpoint requires `Authorization: Bearer <TENANT_KEYS entry>`
-when `TENANT_KEYS` is set.
+when `TENANT_KEYS` is set. Each server boot starts with a fresh database —
+previously ingested docs do not carry over, so no manual `data/` wipe is needed.
 
 ## Endpoints
 

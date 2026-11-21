@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import * as sqliteVec from "sqlite-vec";
 
@@ -103,6 +103,12 @@ export function getDb(): DatabaseSync {
   }
   const dbPath = path.join(process.cwd(), "data", "gatekeep.sqlite3");
   mkdirSync(path.dirname(dbPath), { recursive: true });
+  // Fresh boot starts empty: prior runs' chunks must not leak across
+  // rehearsals/tests sharing a working directory.
+  rmSync(dbPath, { force: true });
+  for (const sidecar of ["-wal", "-shm", "-journal"]) {
+    rmSync(`${dbPath}${sidecar}`, { force: true });
+  }
   // Pinned @types/node predates node:sqlite extension options and the
   // sqlite-vec loader signature, although the runtime supports both.
   type OpenOptions = ConstructorParameters<typeof DatabaseSync>[1];
